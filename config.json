@@ -1,0 +1,4 @@
+{
+  "debug_mode": { "type": "boolean", "default": false, "description": "Verbose logging for the token-payment plugin." },
+  "rates": { "type": "object", "default": { "USD": 0.05, "EUR": 0.045 }, "description": "Currency code → price of one token in that currency. tokens_needed = ceil(invoice_total / rate). Omit a currency to disable token payment for it." }
+}

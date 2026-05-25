@@ -1,0 +1,133 @@
+"""Token-balance payment plugin.
+
+Pay any PENDING invoice with the user's token balance. Internal payment method
+(no external gateway): on ``pay`` it debits the **core** token balance via
+``TokenService`` and finalizes through the shared ``PaymentCapturedEvent`` seam,
+exactly like every other payment plugin — core stays agnostic. Off by default;
+the admin sets the currency→token rate in this plugin's config.
+"""
+from decimal import Decimal
+from typing import Any, Dict, Optional, TYPE_CHECKING
+from uuid import UUID
+
+from vbwd.plugins.base import PluginMetadata
+from vbwd.plugins.payment_provider import (
+    PaymentProviderPlugin,
+    PaymentResult,
+    PaymentStatus,
+)
+
+if TYPE_CHECKING:
+    from flask import Blueprint
+
+
+DEFAULT_CONFIG: Dict[str, Any] = {
+    "debug_mode": False,
+    # currency code -> price of ONE token in that currency.
+    # tokens_needed = ceil(invoice_total / rate). Omit a currency to disable
+    # token payment for invoices in that currency.
+    "rates": {"USD": 0.05, "EUR": 0.045},
+}
+
+
+class TokenPaymentPlugin(PaymentProviderPlugin):
+    """Pay an invoice from the user's token balance."""
+
+    @property
+    def metadata(self) -> PluginMetadata:
+        return PluginMetadata(
+            name="token_payment",
+            version="1.0.0",
+            author="VBWD Team",
+            description=(
+                "Pay any invoice with the user's token balance. Internal, no "
+                "external gateway; admin-configurable currency→token rate."
+            ),
+            dependencies=[],
+        )
+
+    def initialize(self, config: Optional[Dict[str, Any]] = None) -> None:
+        merged = {**DEFAULT_CONFIG}
+        if config:
+            merged.update(config)
+        super().initialize(merged)
+
+    def get_blueprint(self) -> Optional["Blueprint"]:
+        from plugins.token_payment.token_payment.routes import token_payment_plugin_bp
+
+        return token_payment_plugin_bp
+
+    def get_url_prefix(self) -> Optional[str]:
+        return "/api/v1/plugins/token-payment"
+
+    @property
+    def admin_permissions(self):
+        return [
+            {
+                "key": "payments.configure",
+                "label": "Payment provider settings",
+                "group": "Payments",
+            },
+        ]
+
+    def on_enable(self) -> None:
+        pass
+
+    def on_disable(self) -> None:
+        pass
+
+    # ── PaymentProviderPlugin contract ─────────────────────────────────────
+    # This is an INTERNAL payment method: the real charge happens in the
+    # plugin's POST /pay route (debit balance → emit PaymentCapturedEvent).
+    # The gateway-oriented methods below are intentionally minimal but honour
+    # the PaymentResult contract (Liskov) so the plugin is a valid provider.
+
+    def create_payment_intent(
+        self,
+        amount: Decimal,
+        currency: str,
+        subscription_id: UUID,
+        user_id: UUID,
+        metadata: Optional[Dict[str, Any]] = None,
+        capture: bool = True,
+    ) -> PaymentResult:
+        return PaymentResult(
+            success=True,
+            status=PaymentStatus.PENDING,
+            metadata={"note": "token-balance payment is captured via POST /pay"},
+        )
+
+    def capture_payment(
+        self, payment_id: str, amount: Optional[Decimal] = None
+    ) -> PaymentResult:
+        return PaymentResult(
+            success=True, status=PaymentStatus.COMPLETED, transaction_id=payment_id
+        )
+
+    def release_authorization(self, payment_id: str) -> PaymentResult:
+        return PaymentResult(
+            success=True, status=PaymentStatus.CANCELLED, transaction_id=payment_id
+        )
+
+    def process_payment(
+        self, payment_intent_id: str, payment_method: str
+    ) -> PaymentResult:
+        return self.capture_payment(payment_intent_id)
+
+    def refund_payment(
+        self, transaction_id: str, amount: Optional[Decimal] = None
+    ) -> PaymentResult:
+        return PaymentResult(
+            success=False,
+            status=PaymentStatus.FAILED,
+            error_message=(
+                "Token-balance refunds are not automated; credit the user's "
+                "tokens manually."
+            ),
+        )
+
+    def verify_webhook(self, payload: bytes, signature: str) -> bool:
+        return False  # internal method — no webhooks
+
+    def handle_webhook(self, payload: Dict[str, Any]) -> None:
+        pass

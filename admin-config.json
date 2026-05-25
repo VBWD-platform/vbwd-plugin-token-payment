@@ -1,0 +1,18 @@
+{
+  "tabs": [
+    {
+      "id": "general",
+      "label": "General",
+      "fields": [
+        { "key": "debug_mode", "label": "Debug logging", "component": "checkbox" }
+      ]
+    },
+    {
+      "id": "rates",
+      "label": "Token rates",
+      "fields": [
+        { "key": "rates", "label": "Currency → price per token (JSON object, e.g. {\"USD\": 0.05})", "component": "input", "inputType": "text" }
+      ]
+    }
+  ]
+}
