@@ -121,6 +121,35 @@ def test_read_balance_returns_current_wallet_balance(fake_token_service):
     assert service.read_balance(uuid4()) == 1234
 
 
+def test_tokens_paid_for_invoice_returns_abs_of_the_usage_debit(fake_token_service, make_invoice):
+    """For a token-paid invoice, return the absolute tokens debited via USAGE."""
+    from types import SimpleNamespace
+    from vbwd.models.enums import TokenTransactionType
+
+    invoice = make_invoice()
+    transaction_repo = MagicMock()
+    transaction_repo.find_by_reference_id.return_value = SimpleNamespace(
+        amount=-200,
+        transaction_type=TokenTransactionType.USAGE,
+        reference_id=invoice.id,
+    )
+    service = TokenPaymentService(fake_token_service, {"USD": 0.05}, transaction_repo=transaction_repo)
+    assert service.tokens_paid_for_invoice(invoice.id) == 200
+
+
+def test_tokens_paid_for_invoice_returns_none_when_no_transaction(fake_token_service, make_invoice):
+    transaction_repo = MagicMock()
+    transaction_repo.find_by_reference_id.return_value = None
+    service = TokenPaymentService(fake_token_service, {}, transaction_repo=transaction_repo)
+    assert service.tokens_paid_for_invoice(make_invoice().id) is None
+
+
+def test_tokens_paid_for_invoice_returns_none_without_repo(fake_token_service, make_invoice):
+    """Backward-compat: omitting transaction_repo (older callers) is non-throwing."""
+    service = TokenPaymentService(fake_token_service, {})
+    assert service.tokens_paid_for_invoice(make_invoice().id) is None
+
+
 def test_refund_credits_back_with_refund_type(fake_token_service, make_invoice):
     from types import SimpleNamespace
 

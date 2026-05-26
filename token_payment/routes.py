@@ -30,7 +30,12 @@ PROVIDER = "token_payment"
 
 def _build_service(config) -> TokenPaymentService:
     token_service = current_app.container.token_service()
-    return TokenPaymentService(token_service, config.get("rates", {}))
+    transaction_repo = current_app.container.token_transaction_repository()
+    return TokenPaymentService(
+        token_service,
+        config.get("rates", {}),
+        transaction_repo=transaction_repo,
+    )
 
 
 @token_payment_plugin_bp.route("/invoices/<invoice_id>/quote", methods=["GET"])
@@ -44,6 +49,36 @@ def quote(invoice_id):
         return err
     service = _build_service(config)
     return jsonify(service.quote(g.user_id, invoice)), 200
+
+
+@token_payment_plugin_bp.route("/invoices/<invoice_id>/tokens-paid", methods=["GET"])
+@require_auth
+def tokens_paid(invoice_id):
+    """How many tokens were spent on this invoice (for the paid-invoice UI).
+
+    Authenticated; returns ``{ tokens_paid: N | null }``. ``null`` is returned
+    for invoices the user doesn't own, invoices not paid with tokens, or when
+    the plugin is disabled — so the caller can safely hide its UI without
+    leaking info.
+    """
+    from uuid import UUID
+
+    config, err = check_plugin_enabled(PLUGIN_NAME)
+    if err:
+        return jsonify({"tokens_paid": None}), 200
+
+    try:
+        invoice_uuid = UUID(invoice_id)
+    except (ValueError, TypeError):
+        return jsonify({"tokens_paid": None}), 200
+
+    invoice_repo = current_app.container.invoice_repository()
+    invoice = invoice_repo.find_by_id(invoice_uuid)
+    if invoice is None or str(invoice.user_id) != str(g.user_id):
+        return jsonify({"tokens_paid": None}), 200
+
+    service = _build_service(config)
+    return jsonify({"tokens_paid": service.tokens_paid_for_invoice(invoice_uuid)}), 200
 
 
 @token_payment_plugin_bp.route("/quote", methods=["GET"])

@@ -26,13 +26,21 @@ def _coerce_rates(rates: Any) -> Dict[str, Any]:
 class TokenPaymentService:
     """Quote an invoice in tokens and debit/credit the user's balance."""
 
-    def __init__(self, token_service: Any, rates: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        token_service: Any,
+        rates: Optional[Any] = None,
+        transaction_repo: Optional[Any] = None,
+    ) -> None:
         self._token_service = token_service
         # currency code -> price of ONE token in that currency, e.g. {"USD": 0.05}
         self._rates: Dict[str, Decimal] = {
             str(currency).upper(): Decimal(str(price))
             for currency, price in _coerce_rates(rates).items()
         }
+        # Used only by tokens_paid_for_invoice — optional for backward-compat
+        # with older callers that built the service without it.
+        self._transaction_repo = transaction_repo
 
     def rate_for(self, currency: str) -> Optional[Decimal]:
         """Price of one token in ``currency``, or None when not configured / non-positive."""
@@ -90,6 +98,22 @@ class TokenPaymentService:
             description=f"Paid invoice {invoice_label} with token balance",
         )
         return int(updated_balance.balance)
+
+    def tokens_paid_for_invoice(self, invoice_id: Any) -> Optional[int]:
+        """Tokens debited for this invoice via the token-balance USAGE entry.
+
+        Returns the absolute amount (positive integer), or None if the repo
+        wasn't injected, no transaction exists for the invoice, or the
+        transaction isn't a USAGE debit.
+        """
+        if self._transaction_repo is None:
+            return None
+        transaction = self._transaction_repo.find_by_reference_id(invoice_id)
+        if transaction is None:
+            return None
+        if transaction.transaction_type != TokenTransactionType.USAGE:
+            return None
+        return abs(int(transaction.amount))
 
     def refund_for_invoice(self, user_id: Any, invoice: Any, tokens_needed: int) -> int:
         """Give tokens back (used to keep the pay flow atomic if capture fails)."""
