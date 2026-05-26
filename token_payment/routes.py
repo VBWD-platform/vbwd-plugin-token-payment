@@ -9,7 +9,7 @@ payment method — core never learns about tokens.
 """
 import logging
 
-from flask import Blueprint, current_app, g, jsonify
+from flask import Blueprint, current_app, g, jsonify, request
 
 from vbwd.middleware.auth import require_auth
 from vbwd.plugins.payment_route_helpers import (
@@ -46,6 +46,27 @@ def quote(invoice_id):
     return jsonify(service.quote(g.user_id, invoice)), 200
 
 
+@token_payment_plugin_bp.route("/quote", methods=["GET"])
+@require_auth
+def quote_amount():
+    """Amount-based quote (s12) — used by the checkout selector before an invoice exists."""
+    from decimal import Decimal, InvalidOperation
+
+    config, err = check_plugin_enabled(PLUGIN_NAME)
+    if err:
+        return err
+    amount_raw = request.args.get("amount", "")
+    currency = request.args.get("currency", "")
+    try:
+        amount = Decimal(amount_raw)
+    except (InvalidOperation, ValueError):
+        return jsonify({"error": "Invalid amount"}), 400
+    if amount <= 0 or not currency:
+        return jsonify({"error": "amount and currency are required"}), 400
+    service = _build_service(config)
+    return jsonify(service.quote_for_amount(g.user_id, amount, currency)), 200
+
+
 @token_payment_plugin_bp.route("/invoices/<invoice_id>/pay", methods=["POST"])
 @require_auth
 def pay(invoice_id):
@@ -65,7 +86,7 @@ def pay(invoice_id):
 
     tokens_needed = quote_result["tokens_needed"]
     try:
-        new_balance = service.debit_for_invoice(g.user_id, invoice, tokens_needed)
+        service.debit_for_invoice(g.user_id, invoice, tokens_needed)
     except ValueError:
         # balance dropped between quote and debit (concurrent spend)
         return jsonify({"error": "Insufficient token balance"}), 400
@@ -88,6 +109,9 @@ def pay(invoice_id):
         )
         return jsonify({"error": "Payment could not be completed; tokens were refunded"}), 500
 
+    # Post-capture balance — captures any line-item credits (e.g. a token bundle
+    # whose activation credits more tokens than the debit just spent).
+    new_balance = service.read_balance(g.user_id)
     return (
         jsonify(
             {

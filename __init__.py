@@ -71,10 +71,42 @@ class TokenPaymentPlugin(PaymentProviderPlugin):
         ]
 
     def on_enable(self) -> None:
-        pass
+        """Register the ``token_balance`` payment method in the DB so the
+        data-driven checkout selector lists it (s12). Idempotent; preserves
+        the row's id/history."""
+        self._sync_method_record(active=True)
 
     def on_disable(self) -> None:
-        pass
+        """Deactivate (keep the row for historical references)."""
+        self._sync_method_record(active=False)
+
+    def _sync_method_record(self, *, active: bool) -> None:
+        """Best-effort upsert/deactivate of the payment-method row. Swallows
+        errors so a misconfigured DB never blocks plugin enable/disable."""
+        import logging
+
+        try:
+            from vbwd.extensions import db
+            from vbwd.repositories.payment_method_repository import (
+                PaymentMethodRepository,
+            )
+            from plugins.token_payment.token_payment.payment_method import (
+                upsert_token_balance_method,
+                deactivate_token_balance_method,
+            )
+
+            repo = PaymentMethodRepository(db.session)
+            if active:
+                upsert_token_balance_method(repo)
+            else:
+                deactivate_token_balance_method(repo)
+            db.session.commit()
+        except Exception as error:  # pragma: no cover — operational guard
+            logging.getLogger(__name__).warning(
+                "token_payment %s: method-record op skipped: %s",
+                "enable" if active else "disable",
+                error,
+            )
 
     # ── PaymentProviderPlugin contract ─────────────────────────────────────
     # This is an INTERNAL payment method: the real charge happens in the

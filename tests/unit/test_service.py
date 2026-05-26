@@ -79,6 +79,48 @@ def test_debit_propagates_insufficient_balance(fake_token_service, make_invoice)
         service.debit_for_invoice(uuid4(), make_invoice(), 999)
 
 
+def test_quote_for_amount_available_and_sufficient(fake_token_service):
+    """s12: amount-based quote at checkout time (no invoice yet)."""
+    fake_token_service.get_balance.return_value = 500
+    service = TokenPaymentService(fake_token_service, {"USD": 0.05})
+    quote = service.quote_for_amount(uuid4(), Decimal("9.99"), "USD")
+    assert quote["available"] is True
+    assert quote["tokens_needed"] == 200
+    assert quote["balance"] == 500
+    assert quote["balance_after"] == 300
+    assert quote["sufficient"] is True
+
+
+def test_quote_for_amount_no_rate(fake_token_service):
+    fake_token_service.get_balance.return_value = 500
+    service = TokenPaymentService(fake_token_service, {"USD": 0.05})
+    quote = service.quote_for_amount(uuid4(), Decimal("100"), "JPY")
+    assert quote["available"] is False
+    assert quote["reason"] == "no_rate_for_currency"
+
+
+def test_quote_for_amount_insufficient(fake_token_service):
+    fake_token_service.get_balance.return_value = 50
+    service = TokenPaymentService(fake_token_service, {"USD": 0.05})
+    quote = service.quote_for_amount(uuid4(), Decimal("9.99"), "USD")
+    assert quote["available"] is True
+    assert quote["sufficient"] is False
+
+
+def test_rates_can_be_a_json_string(fake_token_service):
+    """Admin UIs render object fields as text inputs; the service must accept
+    either a dict or a JSON-encoded string for `rates`."""
+    service = TokenPaymentService(fake_token_service, '{"USD": 0.05}')
+    assert service.rate_for("USD") == Decimal("0.05")
+
+
+def test_read_balance_returns_current_wallet_balance(fake_token_service):
+    """For the post-capture balance read in the pay route (s11 item 2)."""
+    fake_token_service.get_balance.return_value = 1234
+    service = TokenPaymentService(fake_token_service, {})
+    assert service.read_balance(uuid4()) == 1234
+
+
 def test_refund_credits_back_with_refund_type(fake_token_service, make_invoice):
     from types import SimpleNamespace
 
