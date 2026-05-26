@@ -144,6 +144,11 @@ def pay(invoice_id):
         )
         return jsonify({"error": "Payment could not be completed; tokens were refunded"}), 500
 
+    # Persist the plugin's payment-method details under its own namespace on
+    # the invoice's generic metadata column (agnostic — core doesn't know).
+    service.set_paid_metadata(invoice, tokens_needed)
+    current_app.container.invoice_repository().save(invoice)
+
     # Post-capture balance — captures any line-item credits (e.g. a token bundle
     # whose activation credits more tokens than the debit just spent).
     new_balance = service.read_balance(g.user_id)

@@ -121,6 +121,23 @@ def test_read_balance_returns_current_wallet_balance(fake_token_service):
     assert service.read_balance(uuid4()) == 1234
 
 
+def test_set_paid_metadata_writes_tokens_paid_namespace(fake_token_service, make_invoice):
+    """Plugin owns the `tokens_paid` key on invoice.metadata — agnostic namespacing."""
+    invoice = make_invoice()
+    invoice.payment_metadata = None
+    TokenPaymentService(fake_token_service).set_paid_metadata(invoice, 600)
+    assert invoice.payment_metadata == {"tokens_paid": {"amount": 600}}
+
+
+def test_set_paid_metadata_preserves_other_plugin_namespaces(fake_token_service, make_invoice):
+    """Writing tokens_paid never overwrites another plugin's key (e.g. stripe)."""
+    invoice = make_invoice()
+    invoice.payment_metadata = {"stripe": {"transaction_id": "pi_xxx"}}
+    TokenPaymentService(fake_token_service).set_paid_metadata(invoice, 200)
+    assert invoice.payment_metadata["stripe"] == {"transaction_id": "pi_xxx"}
+    assert invoice.payment_metadata["tokens_paid"] == {"amount": 200}
+
+
 def test_tokens_paid_for_invoice_returns_abs_of_the_usage_debit(fake_token_service, make_invoice):
     """For a token-paid invoice, return the absolute tokens debited via USAGE."""
     from types import SimpleNamespace
