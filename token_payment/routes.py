@@ -126,6 +126,10 @@ def pay(invoice_id):
         # balance dropped between quote and debit (concurrent spend)
         return jsonify({"error": "Insufficient token balance"}), 400
 
+    # Persist the plugin's payment-method details under its own namespace on
+    # the invoice's generic metadata column via the agnostic event seam —
+    # core's PaymentCapturedHandler merges ``event.metadata`` into
+    # ``invoice.metadata`` in the same save as ``mark_paid``. One write, DRY.
     result = emit_payment_captured(
         invoice_id=invoice.id,
         payment_reference=f"token-balance:{invoice.id}",
@@ -133,6 +137,7 @@ def pay(invoice_id):
         currency=invoice.currency,
         provider=PROVIDER,
         transaction_id=str(invoice.id),
+        metadata={"tokens_paid": {"amount": int(tokens_needed)}},
     )
     if not result.success:
         # atomic: capture/activation failed → give the tokens back
@@ -143,11 +148,6 @@ def pay(invoice_id):
             tokens_needed,
         )
         return jsonify({"error": "Payment could not be completed; tokens were refunded"}), 500
-
-    # Persist the plugin's payment-method details under its own namespace on
-    # the invoice's generic metadata column (agnostic — core doesn't know).
-    service.set_paid_metadata(invoice, tokens_needed)
-    current_app.container.invoice_repository().save(invoice)
 
     # Post-capture balance — captures any line-item credits (e.g. a token bundle
     # whose activation credits more tokens than the debit just spent).

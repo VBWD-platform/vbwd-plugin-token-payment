@@ -99,18 +99,6 @@ class TokenPaymentService:
         )
         return int(updated_balance.balance)
 
-    def set_paid_metadata(self, invoice: Any, tokens_needed: int) -> None:
-        """Write ``invoice.metadata['tokens_paid'] = {amount: N}`` on capture.
-
-        The plugin owns the ``tokens_paid`` namespace inside the generic
-        ``vbwd_user_invoice.metadata`` JSON column — agnostic to other plugins'
-        keys (stripe / paypal / …). Reassigns the attribute (not in-place
-        mutation) so SQLAlchemy detects the change.
-        """
-        existing = dict(invoice.payment_metadata or {})
-        existing["tokens_paid"] = {"amount": int(tokens_needed)}
-        invoice.payment_metadata = existing
-
     def tokens_paid_for_invoice(self, invoice_id: Any) -> Optional[int]:
         """Tokens debited for this invoice via the token-balance USAGE entry.
 
