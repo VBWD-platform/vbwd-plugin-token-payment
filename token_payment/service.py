@@ -58,7 +58,9 @@ class TokenPaymentService:
         """Token cost + the user's balance for a PENDING invoice (no side effects)."""
         return self.quote_for_amount(user_id, invoice.total_amount, invoice.currency)
 
-    def quote_for_amount(self, user_id: Any, amount: Any, currency: str) -> Dict[str, Any]:
+    def quote_for_amount(
+        self, user_id: Any, amount: Any, currency: str
+    ) -> Dict[str, Any]:
         """Amount-based quote — used at checkout time when no invoice exists yet (s12)."""
         balance = int(self._token_service.get_balance(user_id))
         rate = self.rate_for(currency)

@@ -115,7 +115,10 @@ def pay(invoice_id):
     service = _build_service(config)
     quote_result = service.quote(g.user_id, invoice)
     if not quote_result["available"]:
-        return jsonify({"error": "Token payment is not available for this currency"}), 422
+        return (
+            jsonify({"error": "Token payment is not available for this currency"}),
+            422,
+        )
     if not quote_result["sufficient"]:
         return jsonify({"error": "Insufficient token balance", **quote_result}), 400
 
@@ -147,7 +150,10 @@ def pay(invoice_id):
             invoice.id,
             tokens_needed,
         )
-        return jsonify({"error": "Payment could not be completed; tokens were refunded"}), 500
+        return (
+            jsonify({"error": "Payment could not be completed; tokens were refunded"}),
+            500,
+        )
 
     # Post-capture balance — captures any line-item credits (e.g. a token bundle
     # whose activation credits more tokens than the debit just spent).

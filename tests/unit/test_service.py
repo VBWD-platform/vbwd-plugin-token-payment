@@ -73,7 +73,9 @@ def test_debit_for_invoice_uses_usage_type_and_invoice_reference(
 
 
 def test_debit_propagates_insufficient_balance(fake_token_service, make_invoice):
-    fake_token_service.debit_tokens.side_effect = ValueError("Insufficient token balance")
+    fake_token_service.debit_tokens.side_effect = ValueError(
+        "Insufficient token balance"
+    )
     service = TokenPaymentService(fake_token_service, {"USD": 0.05})
     with pytest.raises(ValueError):
         service.debit_for_invoice(uuid4(), make_invoice(), 999)
@@ -121,7 +123,9 @@ def test_read_balance_returns_current_wallet_balance(fake_token_service):
     assert service.read_balance(uuid4()) == 1234
 
 
-def test_tokens_paid_for_invoice_returns_abs_of_the_usage_debit(fake_token_service, make_invoice):
+def test_tokens_paid_for_invoice_returns_abs_of_the_usage_debit(
+    fake_token_service, make_invoice
+):
     """For a token-paid invoice, return the absolute tokens debited via USAGE."""
     from types import SimpleNamespace
     from vbwd.models.enums import TokenTransactionType
@@ -133,18 +137,26 @@ def test_tokens_paid_for_invoice_returns_abs_of_the_usage_debit(fake_token_servi
         transaction_type=TokenTransactionType.USAGE,
         reference_id=invoice.id,
     )
-    service = TokenPaymentService(fake_token_service, {"USD": 0.05}, transaction_repo=transaction_repo)
+    service = TokenPaymentService(
+        fake_token_service, {"USD": 0.05}, transaction_repo=transaction_repo
+    )
     assert service.tokens_paid_for_invoice(invoice.id) == 200
 
 
-def test_tokens_paid_for_invoice_returns_none_when_no_transaction(fake_token_service, make_invoice):
+def test_tokens_paid_for_invoice_returns_none_when_no_transaction(
+    fake_token_service, make_invoice
+):
     transaction_repo = MagicMock()
     transaction_repo.find_by_reference_id.return_value = None
-    service = TokenPaymentService(fake_token_service, {}, transaction_repo=transaction_repo)
+    service = TokenPaymentService(
+        fake_token_service, {}, transaction_repo=transaction_repo
+    )
     assert service.tokens_paid_for_invoice(make_invoice().id) is None
 
 
-def test_tokens_paid_for_invoice_returns_none_without_repo(fake_token_service, make_invoice):
+def test_tokens_paid_for_invoice_returns_none_without_repo(
+    fake_token_service, make_invoice
+):
     """Backward-compat: omitting transaction_repo (older callers) is non-throwing."""
     service = TokenPaymentService(fake_token_service, {})
     assert service.tokens_paid_for_invoice(make_invoice().id) is None
