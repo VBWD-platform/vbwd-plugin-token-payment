@@ -23,4 +23,8 @@ def populate_db() -> None:
 
 
 if __name__ == "__main__":
-    populate_db()
+    from vbwd.app import create_app
+
+    app = create_app()
+    with app.app_context():
+        populate_db()
