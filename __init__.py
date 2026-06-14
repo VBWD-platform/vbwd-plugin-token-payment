@@ -27,6 +27,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # tokens_needed = ceil(invoice_total / rate). Omit a currency to disable
     # token payment for invoices in that currency.
     "rates": {"USD": 0.05, "EUR": 0.045},
+    # Email of the user who receives tokens paid via token balance. When set,
+    # a token payment becomes a transfer (payer debited, this user credited).
+    # Empty = debit-only (legacy behaviour).
+    "token_manager_email": "",
 }
 
 

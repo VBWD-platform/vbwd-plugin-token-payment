@@ -4,7 +4,8 @@
       "id": "general",
       "label": "General",
       "fields": [
-        { "key": "debug_mode", "label": "Debug logging", "component": "checkbox" }
+        { "key": "debug_mode", "label": "Debug logging", "component": "checkbox" },
+        { "key": "token_manager_email", "label": "Token manager (email) — tokens paid via balance are transferred to this user; leave empty to debit only", "component": "input", "inputType": "text" }
       ]
     },
     {

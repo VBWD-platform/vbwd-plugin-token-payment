@@ -173,3 +173,106 @@ def test_refund_credits_back_with_refund_type(fake_token_service, make_invoice):
     assert kwargs["amount"] == 200
     assert kwargs["transaction_type"] == TokenTransactionType.REFUND
     assert kwargs["reference_id"] == invoice.id
+
+
+# ── B2: token-manager transfer ─────────────────────────────────────────────
+
+
+def _manager(user_id):
+    """A lightweight token-manager user stand-in."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(id=user_id, email="manager@example.com")
+
+
+def test_debit_transfers_to_configured_manager(fake_token_service, make_invoice):
+    """A configured manager is CREDITED the same tokens the payer is DEBITED."""
+    from types import SimpleNamespace
+
+    payer_id = uuid4()
+    manager_id = uuid4()
+    fake_token_service.debit_tokens.return_value = SimpleNamespace(balance=300)
+    fake_token_service.credit_tokens.return_value = SimpleNamespace(balance=999)
+
+    user_repo = MagicMock()
+    user_repo.find_by_email.return_value = _manager(manager_id)
+
+    service = TokenPaymentService(
+        fake_token_service,
+        {"USD": 0.05},
+        token_manager_email="manager@example.com",
+        user_repo=user_repo,
+    )
+    invoice = make_invoice()
+    service.debit_for_invoice(payer_id, invoice, 200)
+
+    user_repo.find_by_email.assert_called_once_with("manager@example.com")
+    # payer debited
+    _, debit_kwargs = fake_token_service.debit_tokens.call_args
+    assert debit_kwargs["user_id"] == payer_id
+    assert debit_kwargs["amount"] == 200
+    assert debit_kwargs["transaction_type"] == TokenTransactionType.USAGE
+    # manager credited the same amount (real transfer; nets to zero)
+    _, credit_kwargs = fake_token_service.credit_tokens.call_args
+    assert credit_kwargs["user_id"] == manager_id
+    assert credit_kwargs["amount"] == 200
+    assert credit_kwargs["reference_id"] == invoice.id
+
+
+def test_debit_only_when_manager_email_unset(fake_token_service, make_invoice):
+    """No manager configured ⇒ today's behaviour (debit only, no credit)."""
+    from types import SimpleNamespace
+
+    fake_token_service.debit_tokens.return_value = SimpleNamespace(balance=300)
+    user_repo = MagicMock()
+    service = TokenPaymentService(
+        fake_token_service,
+        {"USD": 0.05},
+        token_manager_email="",
+        user_repo=user_repo,
+    )
+    service.debit_for_invoice(uuid4(), make_invoice(), 200)
+
+    fake_token_service.debit_tokens.assert_called_once()
+    fake_token_service.credit_tokens.assert_not_called()
+    user_repo.find_by_email.assert_not_called()
+
+
+def test_debit_only_when_manager_not_found(fake_token_service, make_invoice, caplog):
+    """Configured but unknown manager ⇒ debit-only + a clear warning."""
+    from types import SimpleNamespace
+
+    fake_token_service.debit_tokens.return_value = SimpleNamespace(balance=300)
+    user_repo = MagicMock()
+    user_repo.find_by_email.return_value = None
+    service = TokenPaymentService(
+        fake_token_service,
+        {"USD": 0.05},
+        token_manager_email="ghost@example.com",
+        user_repo=user_repo,
+    )
+    with caplog.at_level("WARNING"):
+        service.debit_for_invoice(uuid4(), make_invoice(), 200)
+
+    fake_token_service.credit_tokens.assert_not_called()
+    assert any("ghost@example.com" in record.message for record in caplog.records)
+
+
+def test_debit_only_when_payer_is_manager(fake_token_service, make_invoice, caplog):
+    """Self-pay (payer == manager) ⇒ debit-only (no pointless self-credit)."""
+    from types import SimpleNamespace
+
+    payer_id = uuid4()
+    fake_token_service.debit_tokens.return_value = SimpleNamespace(balance=300)
+    user_repo = MagicMock()
+    user_repo.find_by_email.return_value = _manager(payer_id)
+    service = TokenPaymentService(
+        fake_token_service,
+        {"USD": 0.05},
+        token_manager_email="manager@example.com",
+        user_repo=user_repo,
+    )
+    with caplog.at_level("WARNING"):
+        service.debit_for_invoice(payer_id, make_invoice(), 200)
+
+    fake_token_service.credit_tokens.assert_not_called()

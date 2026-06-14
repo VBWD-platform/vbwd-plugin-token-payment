@@ -31,10 +31,15 @@ PROVIDER = "token_payment"
 def _build_service(config) -> TokenPaymentService:
     token_service = current_app.container.token_service()
     transaction_repo = current_app.container.token_transaction_repository()
+    # Token manager is resolved by email via the CORE user repository (allowed:
+    # token_payment may depend on core, never on another plugin).
+    user_repo = current_app.container.user_repository()
     return TokenPaymentService(
         token_service,
         config.get("rates", {}),
         transaction_repo=transaction_repo,
+        token_manager_email=config.get("token_manager_email", ""),
+        user_repo=user_repo,
     )
 
 

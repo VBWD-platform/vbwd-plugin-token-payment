@@ -1,4 +1,5 @@
 {
   "debug_mode": { "type": "boolean", "default": false, "description": "Verbose logging for the token-payment plugin." },
-  "rates": { "type": "object", "default": { "USD": 0.05, "EUR": 0.045 }, "description": "Currency code → price of one token in that currency. tokens_needed = ceil(invoice_total / rate). Omit a currency to disable token payment for it." }
+  "rates": { "type": "object", "default": { "USD": 0.05, "EUR": 0.045 }, "description": "Currency code → price of one token in that currency. tokens_needed = ceil(invoice_total / rate). Omit a currency to disable token payment for it." },
+  "token_manager_email": { "type": "string", "default": "", "description": "Email of the user who RECEIVES tokens paid via token balance (the charge becomes a transfer: payer debited, manager credited). Leave empty to debit only." }
 }
