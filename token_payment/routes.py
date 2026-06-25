@@ -12,6 +12,7 @@ import logging
 from flask import Blueprint, current_app, g, jsonify, request
 
 from vbwd.middleware.auth import require_auth
+from vbwd.plugins.payment_provider import ChargeResult
 from vbwd.plugins.payment_route_helpers import (
     check_plugin_enabled,
     validate_invoice_for_payment,
@@ -40,6 +41,64 @@ def _build_service(config) -> TokenPaymentService:
         transaction_repo=transaction_repo,
         token_manager_email=config.get("token_manager_email", ""),
         user_repo=user_repo,
+    )
+
+
+def _capture_token_payment(service, user_id, invoice, tokens_needed) -> ChargeResult:
+    """Debit + capture + refund-on-failure — the atomic core shared by the
+    interactive ``POST /pay`` route and the off-session recurring charge so the
+    two flows can never drift. ``tokens_needed`` is the already-quoted amount.
+    Returns a ChargeResult; never raises a provider-specific error (Liskov)."""
+    try:
+        service.debit_for_invoice(user_id, invoice, tokens_needed)
+    except ValueError:
+        # balance dropped between quote and debit (concurrent spend)
+        return ChargeResult(success=False, error="insufficient_token_balance")
+
+    # Persist the plugin's payment-method details under its own namespace on
+    # the invoice's generic metadata column via the agnostic event seam —
+    # core's PaymentCapturedHandler merges ``event.metadata`` into
+    # ``invoice.metadata`` in the same save as ``mark_paid``. One write, DRY.
+    reference = f"token-balance:{invoice.id}"
+    result = emit_payment_captured(
+        invoice_id=invoice.id,
+        payment_reference=reference,
+        amount=invoice.total_amount,
+        currency=invoice.currency,
+        provider=PROVIDER,
+        transaction_id=str(invoice.id),
+        metadata={"tokens_paid": {"amount": int(tokens_needed)}},
+    )
+    if not result.success:
+        # atomic: capture/activation failed → give the tokens back
+        service.refund_for_invoice(user_id, invoice, tokens_needed)
+        logger.error(
+            "token_payment capture failed for invoice %s; refunded %s tokens",
+            invoice.id,
+            tokens_needed,
+        )
+        return ChargeResult(success=False, error="capture_failed")
+    return ChargeResult(
+        success=True, provider_reference=reference, transaction_id=str(invoice.id)
+    )
+
+
+def charge_invoice_with_tokens(service, user_id, invoice) -> ChargeResult:
+    """Off-session token charge: quote the invoice in tokens, then debit +
+    capture. The token balance IS the user's "saved method"; this is what the
+    core ``RecurringChargeProvider`` capability calls at trial-end / renewal.
+    Returns a ChargeResult (no rate / insufficient / captured / capture-failed)
+    — never raises."""
+    quote_result = service.quote(user_id, invoice)
+    if not quote_result["available"]:
+        return ChargeResult(
+            success=False,
+            error=quote_result.get("reason", "no_rate_for_currency"),
+        )
+    if not quote_result["sufficient"]:
+        return ChargeResult(success=False, error="insufficient_token_balance")
+    return _capture_token_payment(
+        service, user_id, invoice, quote_result["tokens_needed"]
     )
 
 
@@ -128,37 +187,18 @@ def pay(invoice_id):
         return jsonify({"error": "Insufficient token balance", **quote_result}), 400
 
     tokens_needed = quote_result["tokens_needed"]
-    try:
-        service.debit_for_invoice(g.user_id, invoice, tokens_needed)
-    except ValueError:
-        # balance dropped between quote and debit (concurrent spend)
+    # Shared atomic core (debit → capture → refund-on-failure) — identical to
+    # the off-session recurring charge, so the two can never drift.
+    charge = _capture_token_payment(service, g.user_id, invoice, tokens_needed)
+    if not charge.success:
+        if charge.error == "capture_failed":
+            return (
+                jsonify(
+                    {"error": "Payment could not be completed; tokens were refunded"}
+                ),
+                500,
+            )
         return jsonify({"error": "Insufficient token balance"}), 400
-
-    # Persist the plugin's payment-method details under its own namespace on
-    # the invoice's generic metadata column via the agnostic event seam —
-    # core's PaymentCapturedHandler merges ``event.metadata`` into
-    # ``invoice.metadata`` in the same save as ``mark_paid``. One write, DRY.
-    result = emit_payment_captured(
-        invoice_id=invoice.id,
-        payment_reference=f"token-balance:{invoice.id}",
-        amount=invoice.total_amount,
-        currency=invoice.currency,
-        provider=PROVIDER,
-        transaction_id=str(invoice.id),
-        metadata={"tokens_paid": {"amount": int(tokens_needed)}},
-    )
-    if not result.success:
-        # atomic: capture/activation failed → give the tokens back
-        service.refund_for_invoice(g.user_id, invoice, tokens_needed)
-        logger.error(
-            "token_payment capture failed for invoice %s; refunded %s tokens",
-            invoice.id,
-            tokens_needed,
-        )
-        return (
-            jsonify({"error": "Payment could not be completed; tokens were refunded"}),
-            500,
-        )
 
     # Post-capture balance — captures any line-item credits (e.g. a token bundle
     # whose activation credits more tokens than the debit just spent).

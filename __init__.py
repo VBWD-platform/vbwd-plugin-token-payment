@@ -12,9 +12,11 @@ from uuid import UUID
 
 from vbwd.plugins.base import PluginMetadata
 from vbwd.plugins.payment_provider import (
+    ChargeResult,
     PaymentProviderPlugin,
     PaymentResult,
     PaymentStatus,
+    RecurringChargeProvider,
 )
 
 if TYPE_CHECKING:
@@ -34,7 +36,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 }
 
 
-class TokenPaymentPlugin(PaymentProviderPlugin):
+class TokenPaymentPlugin(PaymentProviderPlugin, RecurringChargeProvider):
     """Pay an invoice from the user's token balance."""
 
     @property
@@ -167,3 +169,25 @@ class TokenPaymentPlugin(PaymentProviderPlugin):
 
     def handle_webhook(self, payload: Dict[str, Any]) -> None:
         pass
+
+    # ── RecurringChargeProvider contract (S103.1) ──────────────────────────
+    def charge_saved_method(self, *, user_id: UUID, invoice: Any) -> ChargeResult:
+        """Off-session recurring charge: the user's token balance is the saved
+        method. Re-uses the exact quote→debit→capture path as ``POST /pay`` so
+        the trial-end / renewal flow and the interactive flow never drift.
+        Reads this plugin's live config; returns a ChargeResult, never raises.
+        """
+        from flask import current_app
+        from plugins.token_payment.token_payment.routes import (
+            _build_service,
+            charge_invoice_with_tokens,
+        )
+
+        config_store = getattr(current_app, "config_store", None)
+        config = (
+            config_store.get_config("token_payment")
+            if config_store is not None
+            else None
+        ) or {**DEFAULT_CONFIG}
+        service = _build_service(config)
+        return charge_invoice_with_tokens(service, user_id, invoice)
