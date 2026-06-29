@@ -43,7 +43,7 @@ class TokenPaymentPlugin(PaymentProviderPlugin, RecurringChargeProvider):
     def metadata(self) -> PluginMetadata:
         return PluginMetadata(
             name="token_payment",
-            version="1.0.0",
+            version="26.6",
             author="VBWD Team",
             description=(
                 "Pay any invoice with the user's token balance. Internal, no "
